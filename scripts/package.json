@@ -1,0 +1,25 @@
+{
+  "name": "kinzoku-scripts",
+  "type": "module",
+  "scripts": {
+    "keygen": "bun run generate-keypair.ts",
+    "fetch": "bun run fetch-claims.ts",
+    "fetch:local": "bun run fetch-claims.ts --local",
+    "ship": "bun run mark-shipped.ts",
+    "migrate:v1": "bun run migrate-v1.ts",
+    "migrate:v1:base": "bun run migrate-v1.ts --base",
+
+    "frontend:build": "bun run frontend-build.ts",
+    "frontend:deploy": "bun run frontend-deploy.ts",
+
+    "contract:deploy": "bun run contract-deploy.ts",
+    "anvil": "bun run anvil.ts",
+    "test": "bun run test.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.758.0",
+    "multiformats": "^13.3.2",
+    "tweetnacl": "^1.0.3",
+    "viem": "^2.21.0"
+  }
+}

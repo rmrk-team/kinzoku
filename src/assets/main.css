@@ -1,0 +1,206 @@
+body {
+    margin: 0;
+    padding: 0;
+    text-align: center;
+    background-color: black;
+}
+
+.tile {
+    display: flex;
+    flex: auto;
+    width: 200px;
+    height: 200px;
+    margin: 10px;
+    background-color: #f2f2f2;
+    text-align: center;
+    cursor: pointer;
+    transition: transform .2s;
+}
+
+.tile:hover .tile-content,
+.tile.owned .tile-content {
+    filter: none;
+}
+
+.tile-content {
+    position: relative;
+    filter: grayscale(100%);
+    width: 100%;
+    height: 100%;
+}
+
+.tile:hover {
+    transform: scale(110%);
+}
+
+.tileNumber {
+    color: white;
+    font-size: xxx-large;
+    text-shadow: 2px 2px 0 black;
+    position: absolute;
+    right: 5px;
+    bottom: -3px;
+}
+
+.tile.shipped {
+    position: relative;
+}
+
+.tile.pending {
+    position: relative;
+}
+
+.tile.shipped::after {
+    content: "SHIPPED";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(35deg);
+    color: red;
+    font-size: xxx-large;
+    font-weight: bold;
+    font-family: sans-serif;
+    text-stroke: 1px black;
+    -webkit-text-stroke: 1px black;
+}
+
+
+.tile.pending::after {
+    content: "PENDING";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(35deg);
+    color: blue;
+    font-size: xxx-large;
+    font-weight: bold;
+    font-family: sans-serif;
+    text-stroke: 1px black;
+    -webkit-text-stroke: 1px black;
+}
+
+#header {
+    height: 500px;
+    background-image: url('./griffin.jpg');
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: contain;
+    margin-top: 50px;
+}
+
+#grid {
+    margin-top: 5px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.separator {
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(to right, black, silver, black);
+}
+
+#title {
+    width: 100%;
+}
+
+#title img {
+    width: 100%;
+    max-width: 800px;
+}
+
+#menu ul {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+#menu {
+    font-family: serif;
+    position: sticky;
+    top: 0;
+    background: rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
+    z-index: 1000;
+}
+
+#menu li {
+    float: left;
+}
+
+#menu li:last-child {
+    float: right;
+}
+
+#menu li a {
+    display: block;
+    text-align: center;
+    padding: 14px 16px;
+    text-decoration: none;
+    color: white;
+}
+
+/* Wallet chain status indicator (green/red dot next to address) */
+#connectButton {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.chain-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: #666;
+    display: inline-block;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35) inset;
+    cursor: pointer;
+}
+
+.chain-indicator.ok {
+    background: #2ecc71;
+}
+
+.chain-indicator.bad {
+    background: #ff4d4d;
+}
+
+#about {
+    text-align: left;
+    color: #E0E0E0;
+    padding: 20px;
+    max-width: 800px;
+    margin: auto;
+}
+
+#about dt {
+    font-weight: bold;
+    color: #F0E68C;
+    padding-bottom: 10px;
+}
+
+#about dd {
+    margin-left: 20px;
+    color: #ADD8E6;
+    padding-bottom: 10px;
+}
+
+.whitelink {
+    color: white;
+    font-weight: bold;
+}
+
+
+@media screen and (max-width: 600px) {
+    #header {
+        height: 300px;
+    }
+}
+
+@media screen and (max-width: 350px) {
+    #header {
+        height: 100px;
+    }
+}

@@ -1,0 +1,18 @@
+# Secrets
+kinzoku-keys.json
+*.key
+.env
+
+# Bun
+node_modules/
+bun.lockb
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Foundry
+cache/
+out/
+dist/
+lib/*

@@ -1,0 +1,13 @@
+[profile.default]
+src = "solidity"
+out = "out"
+libs = ["lib"]
+
+optimizer = true
+optimizer_runs = 200
+
+# Allow the deploy script to write `deployments/<chainId>.json`.
+# Without this, `vm.createDir` / `stdJson.write` will revert.
+fs_permissions = [{ access = "read-write", path = "./deployments" }]
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

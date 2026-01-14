@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kinzoku Kanaria</title>
+    <link rel="stylesheet" href="./assets/sweetalert.dark.css" />
+    <link rel="stylesheet" href="./assets/main.css" />
+</head>
+
+<body>
+    <div id="menu">
+        <ul>
+            <li><a href="#about">About</a></li>
+            <li><a href="https://rmrk.app" target="_blank">Modular NFTs</a></li>
+            <li><a href="javascript:void(0)" id="connectButton"><span id="walletLabel">Connect</span>&nbsp;&nbsp;<span id="chainIndicator" class="chain-indicator" aria-label="RPC status"></span></a></li>
+        </ul>
+    </div>
+    <div id="header"></div>
+    <div class="separator"></div>
+    <div id="title">
+        <img src="assets/kinzoku.jpg" alt="">
+    </div>
+    <div class="separator"></div>
+    <div id="grid"></div>
+    <div class="separator"></div>
+    <div id="about">
+        <h3>About</h3>
+        <dl>
+            <dt>What is Kinzoku?</dt>
+            <dd>Kanaria Kinzoku is a simple website for claiming metal print
+                posters of the original Kanaria custom art, given to Founder and
+                Super Founder edition NFT owners.</dd>
+            <dt>What do I need to do?</dt>
+            <dd>Log in with your crypto wallet. The UI will show which NFTs from
+                the list you own. Clicking on those will open a full view of the art
+                with the option to claim the artwork. You will input your address,
+                submit a blockchain transaction to formally register the claim, and
+                be notified when your plate is shipped.</dd>
+            <dt>What is the difference between plexi and metal?</dt>
+            <dd>You can see the difference in <a style="color: white"
+                    href="https://www.youtube.com/watch?v=9_rMJRCvdxA" target="_blank">this video</a> or the image
+                below. You can only claim one.<br /><br />
+                <img src="./assets/compare.jpg" />
+            </dd>
+            <dt>My NFT says "Pending" or "Shipped"!</dt>
+            <dd>It is possible you bought a Kanaria on the secondary market
+                after its previous owner already claimed the artwork. This is
+                unfortunate, but there's nothing we can do about it.</dd>
+            <dt>Why do I need to connect my wallet?</dt>
+            <dd>By using the blockchain, we make sure only the NFT owner can
+                claim a plate. Your shipping address is encrypted with our public key
+                before submission — only we can decrypt it, no servers involved.</dd>
+            <dt>Is my address safe?</dt>
+            <dd>Yes. Your shipping address is encrypted in your browser using
+                industry-standard NaCl encryption before it ever leaves your device.
+                The encrypted blob is stored on-chain, but only we hold the key to
+                decrypt it. No servers, no databases.</dd>
+            <dt>Can I ship to someone else?</dt>
+            <dd>You can ship anywhere. We will send it. If the package is not
+                accepted, what happens to it is anyone's guess.</dd>
+            <dt>I need help / feel unsafe / need to double-check things!</dt>
+            <dd>Contact Bruno on <a class="whitelink" href="https://t.me/swader" target="_blank">Telegram</a> or <a
+                    class="whitelink" href="https://x.com/bitfalls" target="_blank">X</a> for validation /
+                verification.</dd>
+        </dl>
+    </div>
+
+    <script src="./assets/sweetalert.min.js"></script>
+    <script src="./assets/nacl-fast.min.js"></script>
+
+    <script type="module">
+        import { ethers } from "./assets/ethers.min.js";
+
+        // ====================================================================
+        // CONFIGURATION
+        // ====================================================================
+
+        const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+        // Defaults are safe-ish placeholders for local dev; production deploys should inject real values.
+        // `frontend-build.ts` injects `window.__KINZOKU_CONFIG__ = { ... }` into `dist/index.html`.
+        const DEFAULT_CONFIG = {
+            kinzokuAddress: ZERO_ADDRESS,
+            // Base64-encoded NaCl public key (32 bytes). Placeholder is all-zero bytes.
+            encryptionPubkey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        };
+
+        const RUNTIME_CONFIG = window.__KINZOKU_CONFIG__ || {};
+        let KINZOKU_ADDRESS = RUNTIME_CONFIG.kinzokuAddress || DEFAULT_CONFIG.kinzokuAddress;
+        const ENCRYPTION_PUBKEY = RUNTIME_CONFIG.encryptionPubkey || DEFAULT_CONFIG.encryptionPubkey;
+
+        const KANARIA_ADDRESS = "0x011ff409BC4803eC5cFaB41c3Fd1db99fD05c004";
+
+        // ====================================================================
+        // Constants
+        // ====================================================================
+
+        const urlPrefix = "https://singular.app/collectibles/base/" + KANARIA_ADDRESS + "/";
+        const BASE_CHAIN_ID = 8453;
+        const LOCAL_CHAIN_ID = 31337;
+
+        function isLocalDevHost(hostname) {
+            const h = String(hostname || "").toLowerCase();
+            if (h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0" || h === "[::1]") return true;
+            if (h.endsWith(".local")) return true;
+            // Private LAN ranges (useful when opening the dev site via e.g. http://192.168.x.x:8080)
+            if (/^10\.\d+\.\d+\.\d+$/.test(h)) return true;
+            if (/^192\.168\.\d+\.\d+$/.test(h)) return true;
+            if (/^172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+$/.test(h)) return true;
+            return false;
+        }
+
+        const IS_LOCALHOST = isLocalDevHost(window.location.hostname);
+        const LOCAL_RPC_URL = "http://127.0.0.1:8545";
+
+        // When running on localhost, `bun run anvil` deploys KinzokuV2 automatically to a deterministic address on the fork.
+        // This keeps local UI dev friction-free (no manual address wiring).
+        const LOCAL_KINZOKU_ADDRESS = "0xC5273AbFb36550090095B1EDec019216AD21BE6c";
+        if (IS_LOCALHOST) {
+            KINZOKU_ADDRESS = LOCAL_KINZOKU_ADDRESS;
+        }
+
+        const DEFAULT_RPCS = [
+            "https://mainnet.base.org",
+            "https://base.llamarpc.com",
+            "https://1rpc.io/base"
+        ];
+
+        const RPC_OVERRIDE_KEY_BASE = "kinzoku:rpc_url_base";
+        const RPC_OVERRIDE_KEY_LOCAL = "kinzoku:rpc_url_local";
+
+        function getRpcOverrideKey() {
+            return IS_LOCALHOST ? RPC_OVERRIDE_KEY_LOCAL : RPC_OVERRIDE_KEY_BASE;
+        }
+
+        function getDefaultRpcUrl() {
+            return IS_LOCALHOST ? LOCAL_RPC_URL : DEFAULT_RPCS[Math.floor(Math.random() * DEFAULT_RPCS.length)];
+        }
+
+        function getInitialReadRpcUrl() {
+            try {
+                const k = getRpcOverrideKey();
+                const v = localStorage.getItem(k);
+                if (v && /^https?:\/\//i.test(v)) return v;
+            } catch {
+                // ignore
+            }
+            return getDefaultRpcUrl();
+        }
+
+        let readRpcUrl = getInitialReadRpcUrl();
+        let provider = new ethers.JsonRpcProvider(readRpcUrl);
+
+        const gateways = [
+            "https://cloudflare-ipfs.com/ipfs/",
+            "https://ipfs.io/ipfs/",
+            "https://gateway.pinata.cloud/ipfs/"
+        ];
+        const gateway_url = gateways[Math.floor(Math.random() * gateways.length)];
+
+        const birds = {
+            "1": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/01.png",
+            "2": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/02.png",
+            "3": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/03.mp4",
+            "4": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/04.jpg",
+            "5": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/05.jpg",
+            "6": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/06.jpg",
+            "7": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/07.jpeg",
+            "8": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/08.jpg",
+            "9": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/09.jpg",
+            "10": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/10.jpg",
+            "11": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/11.jpg",
+            "12": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/12.png",
+            "13": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/13.jpg",
+            "14": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/14.png",
+            "15": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/15.jpg",
+            "16": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/16.jpg",
+            "17": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/17.jpg",
+            "18": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/18.png",
+            "19": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/xxx.png",
+            "20": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/20.png",
+            "21": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/21.jpg",
+            "22": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/22.jpg",
+            "23": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/23.png",
+            "24": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/24.png",
+            "25": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/25.jpg",
+            "26": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/26.jpg",
+            "27": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/27.jpg",
+            "28": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/28.jpg",
+            "29": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/29.png",
+            "30": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/30.jpg",
+            "31": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/31.jpg",
+            "32": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/32.jpg",
+            "33": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/33.png",
+            "34": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/34.jpg",
+            "35": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/35.jpg",
+            "36": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/36.mp4",
+            "37": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/37.mp4",
+            "38": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/38.jpg",
+            "39": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/39.jpg",
+            "40": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/40.png",
+            "41": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/41.jpg",
+            "42": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/42.jpg",
+            "43": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/43.mp4",
+            "44": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/44.jpg",
+            "45": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/45.png",
+            "46": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/46.jpg",
+            "47": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/47.jpg",
+            "48": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/48.jpg",
+            "49": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/49.jpg",
+            "50": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/50.jpg",
+            "51": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/51.jpg",
+            "52": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/52.png",
+            "53": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/53.png",
+            "54": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/54.jpg",
+            "55": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/55.jpg",
+            "56": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/56.jpg",
+            "57": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/57.jpg",
+            "58": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/58.jpg",
+            "59": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/59.mp4",
+            "60": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/60.png",
+            "61": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/61.mp4",
+            "62": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/62.png",
+            "63": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/63.jpg",
+            "64": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/64.jpg",
+            "65": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/65.mp4",
+            "66": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/66.jpg",
+            "67": null,
+            "68": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/68.mp4",
+            "69": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/69.jpg",
+            "70": "QmNvJBDjdzBuKYWVH3ay2fe7NiDEV63F8pXj21h6R24jxV/70.png",
+            "71": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/71.jpg",
+            "72": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/72.png",
+            "73": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/73.jpg",
+            "74": "QmVDvynt5ADDB3Tg2FSiVyQ8GNs9QCMAboNVnXqyae2g4o/74.png",
+            "75": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/75.png",
+            "76": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/76.jpg",
+            "77": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/77.jpg",
+            "78": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/78.jpg",
+            "79": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/79.jpg",
+            "80": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/80.jpg",
+            "81": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/81.jpg",
+            "82": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/82.mp4",
+            "83": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/83.jpg",
+            "84": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/84.jpg",
+            "85": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/85.jpg",
+            "86": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/86.jpg",
+            "87": null,
+            "88": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/88.jpg",
+            "89": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/89.jpg",
+            "90": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/90.jpg",
+            "91": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/91.jpg",
+            "92": null,
+            "93": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/93.png",
+            "94": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/94.jpg",
+            "95": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/95.jpg",
+            "96": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/96.jpg",
+            "97": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/97.png",
+            "98": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/98.jpg",
+            "99": "QmQBhz44R6K6DeKJCCycgAn9RxPo6tn8Tg7vsEX3wewupP/99.png"
+        };
+
+        const deathmsg = "The owner of this Kanaria egg never hatched the bird. This egg may still exist somewhere, somehow, but what's in it is anyone's guess.";
+
+        const claimform = `
+            <p>Your shipping info is encrypted in-browser before submission. Only we can decrypt it.</p>
+            <p>This requires a small blockchain transaction on Base (under $0.10 in ETH).</p>
+            <form style="text-align: left">
+                <textarea style="width: 98%" autocomplete="off" minlength="20" name="address" id="address" rows="5" 
+                    placeholder="Full shipping address and recipient name. Double-check — this cannot be changed!"></textarea>
+                <div style="margin-top: 10px">
+                    <p style="display: inline-block; margin: 0">Type:</p>
+                    <input type="radio" checked id="plexi" name="type" value="plexi">
+                    <label for="plexi">Plexi Encased</label>
+                    <input type="radio" id="metal" name="type" value="metal">
+                    <label for="metal">Metal Only</label>
+                    <img style="width: 100%; margin-top: 8px" src="./assets/compare.jpg"/>
+                </div>
+                <div style="margin-top: 10px">
+                    <label for="contact">Contact (phone/telegram/email)</label>
+                    <input id="contact" style="width: 100%; margin-top: 4px" type="text" placeholder="In case we need to reach you"/>
+                </div>
+            </form>
+            <div style="margin-top: 10px"><a style="color:white" href="https://www.youtube.com/watch?v=9_rMJRCvdxA" target="_blank">See difference in video</a></div>`;
+
+        // Contract ABIs
+        const kinzokuAbi = [
+            "function claim(uint256 nftId, string encryptedPayload) external",
+            "function getAllOwners() view returns (address[99])",
+            "function getAllStatuses() view returns (uint8[99])"
+        ];
+
+        let kinzokuContract = new ethers.Contract(KINZOKU_ADDRESS, kinzokuAbi, provider);
+
+        // Status enum
+        const Status = { Unclaimed: 0, Pending: 1, Shipped: 2 };
+
+        let browserProvider;
+        let browserSigner;
+        let primaryAddress;
+        let ownershipCache = null;
+        let statusCache = null;
+
+        const grid = document.getElementById('grid');
+        const connectButton = document.getElementById('connectButton');
+        const walletLabel = document.getElementById('walletLabel');
+        const chainIndicator = document.getElementById('chainIndicator');
+
+        // ====================================================================
+        // Encryption
+        // ====================================================================
+
+        function base64ToBytes(b64) {
+            const binStr = atob(b64);
+            const bytes = new Uint8Array(binStr.length);
+            for (let i = 0; i < binStr.length; i++) {
+                bytes[i] = binStr.charCodeAt(i);
+            }
+            return bytes;
+        }
+
+        function bytesToBase64(bytes) {
+            let binStr = '';
+            for (let i = 0; i < bytes.length; i++) {
+                binStr += String.fromCharCode(bytes[i]);
+            }
+            return btoa(binStr);
+        }
+
+        function encryptPayload(data) {
+            if (ENCRYPTION_PUBKEY === DEFAULT_CONFIG.encryptionPubkey) {
+                throw new Error("ENCRYPTION_PUBKEY is not configured (placeholder key).");
+            }
+            const recipientPubKey = base64ToBytes(ENCRYPTION_PUBKEY);
+            const message = new TextEncoder().encode(JSON.stringify(data));
+
+            // Generate ephemeral keypair
+            const ephemeral = nacl.box.keyPair();
+            const nonce = nacl.randomBytes(24);
+
+            // Encrypt
+            const ciphertext = nacl.box(message, nonce, recipientPubKey, ephemeral.secretKey);
+
+            // Format: nonce (24) + ephemeral pubkey (32) + ciphertext
+            const combined = new Uint8Array(24 + 32 + ciphertext.length);
+            combined.set(nonce, 0);
+            combined.set(ephemeral.publicKey, 24);
+            combined.set(ciphertext, 56);
+
+            return bytesToBase64(combined);
+        }
+
+        // ====================================================================
+        // UI Setup
+        // ====================================================================
+
+        async function start() {
+            connectButton.addEventListener("click", connectWalletFlow);
+
+            // RPC health indicator is useful even before the wallet is connected.
+            try {
+                if (chainIndicator) {
+                    chainIndicator.style.display = "inline-block";
+                    chainIndicator.addEventListener("click", (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        void promptRpcOverride();
+                    });
+                }
+            } catch {
+                // ignore
+            }
+            startChainIndicatorPolling();
+
+            if (IS_LOCALHOST) {
+                console.log("Kinzoku: localhost mode");
+                console.log("- Read RPC:", readRpcUrl);
+            }
+
+            // Load sprite data
+            const sprites1 = await (await fetch('assets/sprites/sprite_thumbs0.json')).json();
+            const sprites2 = await (await fetch('assets/sprites/sprite_thumbs1.json')).json();
+            const spriteFrames = sprites1.frames.concat(sprites2.frames);
+
+            // Build grid
+            for (let i = 1; i < 100; i++) {
+                const tileLink = document.createElement('a');
+                tileLink.href = urlPrefix + i;
+                tileLink.target = '_blank';
+                tileLink.style.textDecoration = 'none';
+
+                const tile = document.createElement('div');
+                tile.className = 'tile';
+                tile.dataset.nftId = String(i);
+
+                const number = document.createElement('div');
+                number.className = 'tileNumber';
+                number.textContent = i;
+
+                const tileContent = document.createElement('div');
+                tileContent.className = 'tile-content';
+                tileContent.appendChild(number);
+                tile.appendChild(tileContent);
+
+                const sprite = spriteFrames[i - 1];
+                const imageUrl = i >= 64 ? 'assets/sprites/sprite_thumbs1.jpg' : 'assets/sprites/sprite_thumbs0.jpg';
+                tileContent.style.backgroundImage = `url(${imageUrl})`;
+
+                if ([67, 87, 92].includes(i)) {
+                    tileContent.style.backgroundPosition = `-${spriteFrames[spriteFrames.length - 2].frame.x}px -${spriteFrames[spriteFrames.length - 2].frame.y}px`;
+                } else {
+                    tileContent.style.backgroundPosition = `-${sprite.frame.x}px -${sprite.frame.y}px`;
+                }
+
+                tile.addEventListener('click', showBigBird);
+                tileLink.appendChild(tile);
+                grid.appendChild(tileLink);
+            }
+
+            if (KINZOKU_ADDRESS === ZERO_ADDRESS) {
+                console.warn("Kinzoku contract address not configured (KINZOKU_ADDRESS is zero). Statuses/claims will not work.");
+            } else {
+                await refreshStatuses();
+            }
+        }
+
+        // ====================================================================
+        // Wallet Connection
+        // ====================================================================
+
+        // EIP-6963 multi-wallet discovery (same approach as `locker`).
+        const WALLET_PROVIDER_UUID_KEY = "kinzoku:wallet_provider_uuid";
+        const WALLET_PROVIDER_RDNS_KEY = "kinzoku:wallet_provider_rdns";
+        const discoveredProviders = [];
+        let activeWalletProvider = null;
+        const walletEventAttached = new WeakSet();
+
+        const deferMicrotask = (fn) => {
+            if (typeof queueMicrotask === "function") queueMicrotask(fn);
+            else Promise.resolve().then(fn);
+        };
+
+        // Chain indicator (read-RPC reachability)
+        let chainIndicatorTimer = null;
+
+        function parseHexChainId(raw) {
+            const s = String(raw || "").trim();
+            if (!s) return null;
+            const n = s.startsWith("0x") ? Number.parseInt(s, 16) : Number(s);
+            return Number.isFinite(n) ? n : null;
+        }
+
+        async function rpcChainId(url, timeoutMs = 1200) {
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), timeoutMs);
+            try {
+                const r = await fetch(url, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}',
+                    signal: ctrl.signal,
+                });
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const j = await r.json();
+                const id = parseHexChainId(j?.result);
+                if (!id) throw new Error("Bad chainId response");
+                return id;
+            } finally {
+                clearTimeout(t);
+            }
+        }
+
+        function setChainIndicator(state, tooltip) {
+            if (!chainIndicator) return;
+            chainIndicator.classList.remove("ok", "bad");
+            chainIndicator.title = "";
+            if (state === "ok") chainIndicator.classList.add("ok");
+            if (state === "bad") chainIndicator.classList.add("bad");
+            if (tooltip) chainIndicator.title = String(tooltip);
+        }
+
+        async function updateChainIndicator() {
+            if (!chainIndicator) return;
+            try {
+                await rpcChainId(readRpcUrl);
+                setChainIndicator("ok", `Connected to ${readRpcUrl}\n(click to change RPC)`);
+            } catch (e) {
+                const hint = IS_LOCALHOST
+                    ? `\nTip: start a fork in another terminal:\n  cd scripts && bun run anvil`
+                    : "";
+                setChainIndicator("bad", `Cannot reach RPC:\n${readRpcUrl}${hint}\n(click to change RPC)`);
+            }
+        }
+
+        function startChainIndicatorPolling() {
+            try {
+                if (chainIndicatorTimer) clearInterval(chainIndicatorTimer);
+                chainIndicatorTimer = setInterval(() => void updateChainIndicator(), 5000);
+            } catch {
+                // ignore
+            }
+            void updateChainIndicator();
+        }
+
+        function setReadRpcUrl(url, refresh) {
+            readRpcUrl = url;
+            provider = new ethers.JsonRpcProvider(readRpcUrl);
+            kinzokuContract = new ethers.Contract(KINZOKU_ADDRESS, kinzokuAbi, provider);
+            void updateChainIndicator();
+            if (refresh) {
+                void refreshStatuses();
+                if (primaryAddress) {
+                    void refreshOwnership().then(() => markOwnedNfts());
+                }
+            }
+        }
+
+        async function promptRpcOverride() {
+            const current = readRpcUrl;
+            const key = getRpcOverrideKey();
+            const title = IS_LOCALHOST ? "Local RPC URL" : "Base RPC URL";
+
+            const res = await Swal.fire({
+                title,
+                html: `<div style="text-align:left; font-size: 14px; opacity: 0.9">Current:<br><code>${current}</code></div>`,
+                input: "text",
+                inputValue: current,
+                inputPlaceholder: "https://… or http://…",
+                showCancelButton: true,
+                showDenyButton: true,
+                denyButtonText: "Reset",
+                confirmButtonText: "Save",
+                preConfirm: async (value) => {
+                    const v = String(value || "").trim();
+                    if (!v) return "";
+                    if (!/^https?:\/\//i.test(v)) {
+                        Swal.showValidationMessage("RPC URL must start with http:// or https://");
+                        return false;
+                    }
+                    try {
+                        await rpcChainId(v, 1500);
+                    } catch {
+                        Swal.showValidationMessage("Could not reach that RPC (try another URL)");
+                        return false;
+                    }
+                    return v;
+                },
+            });
+
+            if (res.isDenied) {
+                try { localStorage.removeItem(key); } catch { }
+                setReadRpcUrl(getDefaultRpcUrl(), true);
+                return;
+            }
+            if (!res.isConfirmed) return;
+
+            const v = String(res.value || "").trim();
+            if (!v) return;
+            try { localStorage.setItem(key, v); } catch { }
+            setReadRpcUrl(v, true);
+        }
+
+        window.addEventListener("eip6963:announceProvider", (event) => {
+            const detail = event?.detail;
+            if (!detail?.info?.uuid || !detail?.provider) return;
+            if (discoveredProviders.some((p) => p.info.uuid === detail.info.uuid)) return;
+            discoveredProviders.push(detail);
+        });
+        deferMicrotask(() => window.dispatchEvent(new Event("eip6963:requestProvider")));
+
+        function getSavedWalletPreference() {
+            try {
+                return {
+                    uuid: localStorage.getItem(WALLET_PROVIDER_UUID_KEY) || "",
+                    rdns: localStorage.getItem(WALLET_PROVIDER_RDNS_KEY) || "",
+                };
+            } catch {
+                return { uuid: "", rdns: "" };
+            }
+        }
+
+        function attachWalletEvents(p) {
+            try {
+                if (!p?.on) return;
+                if (walletEventAttached.has(p)) return;
+                walletEventAttached.add(p);
+
+                p.on("accountsChanged", async (accts) => {
+                    if (!accts?.length) {
+                        disconnectWallet();
+                        return;
+                    }
+                    // Keep UI in sync if the user switches accounts in-wallet.
+                    primaryAddress = accts[0];
+                    if (walletLabel) walletLabel.textContent = primaryAddress.slice(0, 6) + '...' + primaryAddress.slice(-4);
+                    void updateChainIndicator();
+                    await refreshOwnership();
+                    markOwnedNfts();
+                });
+            } catch {
+                // Best-effort only.
+            }
+        }
+
+        function walletProvider() {
+            if (activeWalletProvider) return activeWalletProvider;
+            const pref = getSavedWalletPreference();
+            if (pref.uuid) {
+                const found = discoveredProviders.find((p) => p.info.uuid === pref.uuid);
+                if (found) return found.provider;
+            }
+            if (pref.rdns) {
+                const found = discoveredProviders.find((p) => p.info.rdns === pref.rdns);
+                if (found) return found.provider;
+            }
+            if (discoveredProviders.length === 1) return discoveredProviders[0].provider;
+            return window.ethereum || null;
+        }
+
+        function getWalletChoices() {
+            // Prefer explicit EIP-6963 providers when available (avoids “wrong wallet” surprises).
+            const out = discoveredProviders.map((p) => ({
+                name: p.info.name,
+                uuid: p.info.uuid,
+                rdns: p.info.rdns,
+                provider: p.provider,
+            }));
+
+            if (out.length > 0) return out;
+
+            // Fallback: some environments expose multiple providers via `window.ethereum.providers`.
+            const eth = window.ethereum;
+            const providers = Array.isArray(eth?.providers) ? eth.providers : [];
+            if (providers.length) {
+                const named = providers.map((p) => {
+                    const name =
+                        p?.isMetaMask ? "MetaMask" :
+                            p?.isRabby ? "Rabby" :
+                                p?.isCoinbaseWallet ? "Coinbase Wallet" :
+                                    "Browser Wallet";
+                    return { name, provider: p };
+                });
+                return named;
+            }
+
+            // Final fallback: single injected provider.
+            if (eth) return [{ name: "Browser Wallet", provider: eth }];
+            return [];
+        }
+
+        async function connectWallet(provider, meta) {
+            const p = provider || walletProvider();
+            if (!p?.request) throw new Error("No wallet provider found");
+
+            activeWalletProvider = p;
+            attachWalletEvents(p);
+
+            // Save preference for next time (if available).
+            try {
+                if (meta?.uuid) localStorage.setItem(WALLET_PROVIDER_UUID_KEY, meta.uuid);
+                if (meta?.rdns) localStorage.setItem(WALLET_PROVIDER_RDNS_KEY, meta.rdns);
+            } catch {
+                // ignore
+            }
+
+            await p.request({ method: "eth_requestAccounts" });
+
+            browserProvider = new ethers.BrowserProvider(p);
+            browserSigner = await browserProvider.getSigner();
+            primaryAddress = await browserSigner.getAddress();
+
+            if (walletLabel) walletLabel.textContent = primaryAddress.slice(0, 6) + '...' + primaryAddress.slice(-4);
+            connectButton.removeEventListener("click", connectWalletFlow);
+            connectButton.addEventListener("click", disconnectWallet);
+
+            startChainIndicatorPolling();
+            await refreshOwnership();
+            markOwnedNfts();
+        }
+
+        async function connectWalletFlow() {
+            const choices = getWalletChoices();
+            if (choices.length === 0) {
+                Swal.fire({
+                    title: 'No Wallet',
+                    html: 'Install <a style="color:gray" href="https://metamask.io" target="_blank">Metamask</a>, Rabby, or another wallet extension and refresh.',
+                    icon: 'error'
+                });
+                return;
+            }
+
+            let selected = null;
+            if (choices.length === 1) {
+                selected = choices[0];
+            } else {
+                const pref = getSavedWalletPreference();
+                const preferredIndex = choices.findIndex((c) => (pref.uuid && c.uuid === pref.uuid) || (pref.rdns && c.rdns === pref.rdns));
+                const inputOptions = {};
+                choices.forEach((c, i) => inputOptions[String(i)] = c.name);
+
+                const res = await Swal.fire({
+                    title: 'Connect Wallet',
+                    input: 'select',
+                    inputOptions,
+                    inputValue: preferredIndex >= 0 ? String(preferredIndex) : undefined,
+                    showCancelButton: true,
+                    confirmButtonText: 'Connect',
+                });
+                if (!res.isConfirmed) return;
+                const idx = Number(res.value);
+                if (!Number.isFinite(idx) || !choices[idx]) return;
+                selected = choices[idx];
+            }
+
+            try {
+                await connectWallet(selected.provider, selected);
+            } catch (e) {
+                console.error("Wallet connect failed:", e);
+                Swal.fire({ icon: 'error', title: 'Connect failed', text: e?.message || 'Unknown error' });
+            }
+        }
+
+        function disconnectWallet() {
+            connectButton.removeEventListener("click", disconnectWallet);
+            connectButton.addEventListener("click", connectWalletFlow);
+            if (walletLabel) walletLabel.textContent = "Connect";
+            browserProvider = null;
+            browserSigner = null;
+            primaryAddress = null;
+            activeWalletProvider = null;
+
+            document.querySelectorAll('.tile.owned').forEach(t => t.classList.remove('owned'));
+        }
+
+        // ====================================================================
+        // Data Fetching
+        // ====================================================================
+
+        async function refreshStatuses() {
+            try {
+                statusCache = await kinzokuContract.getAllStatuses();
+                applyStatusClasses();
+            } catch (e) {
+                console.error("Failed to fetch statuses:", e);
+            }
+        }
+
+        async function refreshOwnership() {
+            if (KINZOKU_ADDRESS === ZERO_ADDRESS) return;
+            try {
+                ownershipCache = await kinzokuContract.getAllOwners();
+            } catch (e) {
+                console.error("Failed to fetch owners:", e);
+            }
+        }
+
+        function applyStatusClasses() {
+            if (!statusCache) return;
+            for (let i = 0; i < 99; i++) {
+                const tile = document.querySelector(`.tile[data-nft-id="${i + 1}"]`);
+                if (!tile) continue;
+
+                tile.classList.remove('pending', 'shipped');
+                const status = Number(statusCache[i]);
+                if (status === Status.Pending) tile.classList.add('pending');
+                if (status === Status.Shipped) tile.classList.add('shipped');
+            }
+        }
+
+        function markOwnedNfts() {
+            if (!ownershipCache || !primaryAddress) return;
+            for (let i = 0; i < 99; i++) {
+                const tile = document.querySelector(`.tile[data-nft-id="${i + 1}"]`);
+                if (tile && ownershipCache[i].toLowerCase() === primaryAddress.toLowerCase()) {
+                    tile.classList.add('owned');
+                }
+            }
+        }
+
+        // ====================================================================
+        // Claim Flow
+        // ====================================================================
+
+        function showBigBird(e) {
+            e.preventDefault();
+            const id = parseInt(e.currentTarget?.dataset?.nftId || "0", 10);
+            if (!id) return;
+            const tile = e.currentTarget;
+
+            const s = id < 10 ? "Super " : "";
+            const mediaUrl = [67, 87, 92].includes(id) ? "" : gateway_url + birds[id];
+
+            const isOwned = tile.classList.contains('owned');
+            const isPending = tile.classList.contains('pending');
+            const isShipped = tile.classList.contains('shipped');
+            const canClaim = isOwned && !isPending && !isShipped;
+
+            Swal.fire({
+                title: `Kanaria ${s}Founder ${id}`,
+                imageUrl: mediaUrl && !mediaUrl.includes('mp4') ? mediaUrl : '',
+                html: !mediaUrl ? deathmsg : mediaUrl.includes('mp4') ? `<video style="width:100%" controls><source src="${mediaUrl}" type="video/mp4"></video>` : '',
+                width: "90%",
+                showDenyButton: true,
+                showCancelButton: !!mediaUrl,
+                confirmButtonText: isPending ? "Pending..." : isShipped ? "Shipped!" : "Claim",
+                showConfirmButton: canClaim,
+                denyButtonText: "Close",
+                cancelButtonText: "View on Singular",
+                denyButtonColor: "#555",
+                cancelButtonColor: "#555",
+                allowOutsideClick: false
+            }).then((result) => {
+                if (result.isConfirmed && canClaim) {
+                    showClaimForm(id);
+                } else if (result.isDismissed) {
+                    window.open(urlPrefix + id, '_blank');
+                }
+            });
+        }
+
+        function showClaimForm(nftId) {
+            Swal.fire({
+                title: 'Claim NFT #' + nftId,
+                html: claimform,
+                confirmButtonText: 'Submit Claim',
+                showCancelButton: true,
+                preConfirm: async () => {
+                    const address = document.getElementById('address').value.trim();
+                    const contact = document.getElementById('contact').value.trim();
+                    const type = document.getElementById('plexi').checked ? 'plexi' : 'metal';
+
+                    if (address.length < 20) {
+                        Swal.showValidationMessage('Address too short');
+                        return false;
+                    }
+
+                    if (!contact) {
+                        Swal.showValidationMessage('Please provide contact info');
+                        return false;
+                    }
+
+                    return { address, contact, type, nftId };
+                }
+            }).then(async (result) => {
+                if (result.isConfirmed && result.value) {
+                    await submitClaim(result.value);
+                }
+            });
+        }
+
+        async function submitClaim({ address, contact, type, nftId }) {
+            if (KINZOKU_ADDRESS === ZERO_ADDRESS) {
+                Swal.fire({ icon: 'error', title: 'Not configured', text: 'Contract address is not set yet.' });
+                return;
+            }
+            const p = walletProvider();
+            if (!p?.request || !browserSigner) {
+                Swal.fire({ icon: 'error', title: 'Not connected', text: 'Connect a wallet first.' });
+                return;
+            }
+            const TARGET_CHAIN_ID = IS_LOCALHOST ? LOCAL_CHAIN_ID : BASE_CHAIN_ID;
+            try {
+                // Ensure on correct chain (localhost → Anvil, otherwise → Base mainnet)
+                await p.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: '0x' + TARGET_CHAIN_ID.toString(16) }]
+                });
+            } catch (e) {
+                const code = e?.code ?? e?.data?.originalError?.code;
+                // 4902: unknown chain
+                if (code === 4902) {
+                    try {
+                        if (IS_LOCALHOST) {
+                            await p.request({
+                                method: 'wallet_addEthereumChain',
+                                params: [{
+                                    chainId: '0x' + LOCAL_CHAIN_ID.toString(16),
+                                    chainName: 'Anvil (local)',
+                                    rpcUrls: [LOCAL_RPC_URL],
+                                    nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+                                }]
+                            });
+                        } else {
+                            await p.request({
+                                method: 'wallet_addEthereumChain',
+                                params: [{
+                                    chainId: '0x' + BASE_CHAIN_ID.toString(16),
+                                    chainName: 'Base',
+                                    rpcUrls: ["https://mainnet.base.org"],
+                                    nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+                                    blockExplorerUrls: ["https://basescan.org"],
+                                }]
+                            });
+                        }
+                        // Retry switch after adding.
+                        await p.request({
+                            method: 'wallet_switchEthereumChain',
+                            params: [{ chainId: '0x' + TARGET_CHAIN_ID.toString(16) }]
+                        });
+                    } catch (e2) {
+                        Swal.fire({ icon: 'error', text: IS_LOCALHOST ? 'Please connect to your local Anvil network' : 'Please switch to Base network' });
+                        return;
+                    }
+                } else {
+                    Swal.fire({ icon: 'error', text: IS_LOCALHOST ? 'Please connect to your local Anvil network' : 'Please switch to Base network' });
+                    return;
+                }
+            }
+
+            // Encrypt payload
+            const encrypted = encryptPayload({ address, contact, type });
+
+            Swal.fire({
+                title: 'Submitting...',
+                text: 'Confirm the transaction in your wallet',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+
+            try {
+                const contractWithSigner = kinzokuContract.connect(browserSigner);
+                const tx = await contractWithSigner.claim(nftId, encrypted);
+
+                Swal.fire({
+                    title: 'Waiting for confirmation...',
+                    html: IS_LOCALHOST ? `Tx hash: <code>${tx.hash}</code>` : `<a href="https://basescan.org/tx/${tx.hash}" target="_blank">View transaction</a>`,
+                    allowOutsideClick: false,
+                    didOpen: () => Swal.showLoading()
+                });
+
+                await tx.wait();
+
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Claim Submitted!',
+                    text: 'Your plate will ship soon. Check back to see status change to "Shipped".'
+                });
+
+                // Refresh UI
+                await refreshStatuses();
+                applyStatusClasses();
+
+            } catch (e) {
+                console.error('Claim failed:', e);
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Transaction Failed',
+                    text: e.reason || e.message || 'Unknown error'
+                });
+            }
+        }
+
+        // ====================================================================
+        // Start
+        // ====================================================================
+
+        start();
+    </script>
+</body>
+
+</html>

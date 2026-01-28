@@ -8,6 +8,7 @@
     "ship": "bun run mark-shipped.ts",
     "migrate:v1": "bun run migrate-v1.ts",
     "migrate:v1:base": "bun run migrate-v1.ts --base",
+    "migrate:v2": "bun run migrate-v2.ts",
 
     "frontend:build": "bun run frontend-build.ts",
     "frontend:deploy": "bun run frontend-deploy.ts",

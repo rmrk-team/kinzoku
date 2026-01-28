@@ -5,6 +5,14 @@ interface IKanaria {
     function ownerOf(uint256 tokenId) external view returns (address);
 }
 
+interface IKinzokuV2Like {
+    function getClaim(uint256 nftId) external view returns (
+        address claimant,
+        uint8 status,
+        string memory encryptedPayload
+    );
+}
+
 /// @title KinzokuV2 - Serverless metal plate claims for Kanaria Founders
 /// @notice Encrypted shipping data stored on-chain, only owner can decrypt
 contract KinzokuV2 {
@@ -150,5 +158,31 @@ contract KinzokuV2 {
     ) {
         Claim storage c = claims[nftId];
         return (c.claimant, c.status, c.encryptedPayload);
+    }
+
+    /// @notice Owner can migrate claims from a previous KinzokuV2 deployment.
+    /// @dev Copies claimant, status and encrypted payload for the provided IDs.
+    ///      This does NOT overwrite existing claims on this contract.
+    function migrateFrom(address oldContract, uint256[] calldata nftIds) external onlyOwner {
+        require(oldContract != address(0), "oldContract=0");
+        IKinzokuV2Like oldKinzoku = IKinzokuV2Like(oldContract);
+
+        for (uint256 i = 0; i < nftIds.length; i++) {
+            uint256 nftId = nftIds[i];
+            if (nftId == 0 || nftId > MAX_ID) continue;
+            if (claims[nftId].status != Status.Unclaimed) continue; // don't overwrite
+
+            (address claimant, uint8 statusRaw, string memory payload) = oldKinzoku.getClaim(nftId);
+            if (statusRaw > uint8(Status.Shipped)) continue;
+
+            Status st = Status(statusRaw);
+            if (st == Status.Unclaimed) continue;
+
+            claims[nftId] = Claim({ claimant: claimant, status: st, encryptedPayload: payload });
+            emit StatusChanged(nftId, st);
+            if (claimant != address(0)) {
+                emit Claimed(nftId, claimant);
+            }
+        }
     }
 }

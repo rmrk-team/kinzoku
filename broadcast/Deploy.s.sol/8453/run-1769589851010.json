@@ -1,7 +1,7 @@
 {
   "transactions": [
     {
-      "hash": "0x27fe7d2817f7d18736c0720c5e414aa5157f8ed6ae4f200014715ad1435c3b76",
+      "hash": null,
       "transactionType": "CREATE2",
       "contractName": "KinzokuV2",
       "contractAddress": "0x3358a420b98f645969bc716bead0321770717cf5",
@@ -23,31 +23,7 @@
       "isFixedGasLimit": false
     }
   ],
-  "receipts": [
-    {
-      "status": "0x1",
-      "cumulativeGasUsed": "0x26349d3",
-      "logs": [],
-      "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-      "type": "0x2",
-      "transactionHash": "0x27fe7d2817f7d18736c0720c5e414aa5157f8ed6ae4f200014715ad1435c3b76",
-      "transactionIndex": "0x5b",
-      "blockHash": "0xab81368c688c9bbab86e6ad500c90c08a4008536ed738bc08dba15a86eb36324",
-      "blockNumber": "0x277b8c6",
-      "gasUsed": "0x13dfd3",
-      "effectiveGasPrice": "0x3ddcdc",
-      "blobGasUsed": "0x0",
-      "from": "0xbe84ae8a04e88066a4eb513c49a3fea0c2218b92",
-      "to": "0x4e59b44847b379578588920ca78fbf26c0b4956c",
-      "contractAddress": "0x3358a420b98f645969bc716bead0321770717cf5",
-      "l1BaseFeeScalar": "0x8dd",
-      "l1BlobBaseFee": "0x65512d",
-      "l1BlobBaseFeeScalar": "0x101c12",
-      "l1Fee": "0x8a527eeb0",
-      "l1GasPrice": "0x6fca41c",
-      "l1GasUsed": "0xcdfe"
-    }
-  ],
+  "receipts": [],
   "libraries": [],
   "pending": [],
   "returns": {
@@ -56,7 +32,7 @@
       "value": "0x3358A420B98f645969BC716BEAD0321770717Cf5"
     }
   },
-  "timestamp": 1769590419967,
+  "timestamp": 1769589851010,
   "chain": 8453,
   "commit": "f4352fe"
 }

@@ -321,7 +321,11 @@ async function getCanonicalPublicResolver(publicClient: ReturnType<typeof create
 }
 
 async function updateEnsContenthash(opts: { name: string; cid: string; autoSwitchResolver?: boolean }) {
-  const privateKey = requiredEnv("PRIVATE_KEY");
+  const privateKeyEnvKey = process.env.ENS_PRIVATE_KEY ? "ENS_PRIVATE_KEY" : "PRIVATE_KEY";
+  const privateKey = String(process.env.ENS_PRIVATE_KEY || process.env.PRIVATE_KEY || "").trim();
+  if (!privateKey) {
+    throw new Error("Missing ENS_PRIVATE_KEY (or PRIVATE_KEY) for ENS update.");
+  }
   const rpcUrl = process.env.ETH_RPC_URL || "https://eth.llamarpc.com";
 
   const account = privateKeyToAccount(privateKey as `0x${string}`);
@@ -354,7 +358,7 @@ async function updateEnsContenthash(opts: { name: string; cid: string; autoSwitc
 
   if (registryOwner.toLowerCase() !== account.address.toLowerCase()) {
     throw new Error(
-      `PRIVATE_KEY address (${account.address}) is not the ENS owner for ${opts.name}.\n` +
+      `${privateKeyEnvKey} address (${account.address}) is not the ENS owner for ${opts.name}.\n` +
         `ENS registry owner is ${registryOwner} (node ${node}).`,
     );
   }

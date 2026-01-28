@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { loadDotEnvIfPresent, requiredEnv } from "./lib/env.ts";
 
@@ -56,6 +56,16 @@ async function runForge(args: string[], extraEnv?: Record<string, string>) {
 async function main() {
   await loadDotEnvIfPresent(DOTENV_PATH);
 
+  // `forge script` may write deployments/<chainId>.json even if broadcast fails (e.g. insufficient funds),
+  // because the script runs locally and writes during simulation. Keep a backup so we can restore.
+  const deploymentPath = join(REPO_ROOT, "deployments", "8453.json");
+  let prevDeploymentRaw: string | null = null;
+  try {
+    prevDeploymentRaw = await readFile(deploymentPath, "utf8");
+  } catch {
+    prevDeploymentRaw = null;
+  }
+
   // Required.
   requiredEnv("PRIVATE_KEY");
   const rpcUrl = requiredEnv("BASE_RPC_URL");
@@ -89,9 +99,7 @@ async function main() {
   try {
     await runForge(args, extraEnv);
   } catch (err: any) {
-    if (!verify) throw err;
-
-    // `forge script --verify` may fail to verify CREATE2 deployments even if the on-chain tx succeeded.
+    // `forge script` may fail even if the on-chain tx succeeded (especially around verification).
     // Be helpful: check whether code exists at the newly written deployments/8453.json address.
     try {
       const deployed = await readDeploymentAddress(8453);
@@ -99,20 +107,37 @@ async function main() {
         const ok = await hasCode(rpcUrl, deployed);
         if (ok) {
           console.warn("");
-          console.warn("Warning: deployment appears SUCCESSFUL, but verification FAILED.");
+          console.warn(
+            verify
+              ? "Warning: deployment appears SUCCESSFUL, but verification FAILED."
+              : "Warning: deployment appears SUCCESSFUL, but forge returned an error.",
+          );
           console.warn(`- Deployed: ${deployed}`);
           console.warn(`- RPC:      ${rpcUrl}`);
           console.warn("You can retry verification later (Basescan queue can be flaky).");
           // Treat as success.
-        } else {
-          throw err;
+          return;
         }
-      } else {
-        throw err;
       }
     } catch {
-      throw err;
+      // ignore
     }
+
+    // If we got here, broadcast did not deploy code at the recorded address.
+    // Restore the previous deployments file (or delete it if it didn't exist) to avoid leaving a bad address behind.
+    try {
+      if (prevDeploymentRaw !== null) {
+        await writeFile(deploymentPath, prevDeploymentRaw, "utf8");
+      } else {
+        await rm(deploymentPath, { force: true });
+      }
+    } catch (restoreErr: any) {
+      console.warn("Warning: failed to restore deployments/8453.json after failed deployment.");
+      console.warn(restoreErr?.message || restoreErr);
+    }
+
+    // Re-throw original error.
+    throw err;
   }
   console.log("Done.");
   console.log("Deployment metadata: deployments/8453.json");

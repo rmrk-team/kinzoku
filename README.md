@@ -219,3 +219,4 @@ Uses:
 
 - public RPC for reads (`PUBLIC_BASE_RPC_URL`)
 - paid RPC for writes (`BASE_RPC_URL`)
+

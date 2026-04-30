@@ -6,11 +6,10 @@ interface IKanaria {
 }
 
 interface IKinzokuV2Like {
-    function getClaim(uint256 nftId) external view returns (
-        address claimant,
-        uint8 status,
-        string memory encryptedPayload
-    );
+    function getClaim(uint256 nftId)
+        external
+        view
+        returns (address claimant, uint8 status, string memory encryptedPayload);
 }
 
 /// @title KinzokuV2 - Serverless metal plate claims for Kanaria Founders
@@ -20,7 +19,11 @@ contract KinzokuV2 {
     IKanaria public immutable kanaria;
     uint256 public constant MAX_ID = 99;
 
-    enum Status { Unclaimed, Pending, Shipped }
+    enum Status {
+        Unclaimed,
+        Pending,
+        Shipped
+    }
 
     struct Claim {
         address claimant;
@@ -64,18 +67,11 @@ contract KinzokuV2 {
     /// @notice Claim a metal plate for an NFT you own
     /// @param nftId The Kanaria Founder NFT ID (1-99)
     /// @param encryptedPayload NaCl sealed box with shipping info
-    function claim(
-        uint256 nftId,
-        string calldata encryptedPayload
-    ) external onlyTokenOwner(nftId) validId(nftId) {
+    function claim(uint256 nftId, string calldata encryptedPayload) external onlyTokenOwner(nftId) validId(nftId) {
         if (claims[nftId].status != Status.Unclaimed) revert AlreadyClaimed();
         if (bytes(encryptedPayload).length == 0) revert EmptyPayload();
-        
-        claims[nftId] = Claim({
-            claimant: msg.sender,
-            status: Status.Pending,
-            encryptedPayload: encryptedPayload
-        });
+
+        claims[nftId] = Claim({claimant: msg.sender, status: Status.Pending, encryptedPayload: encryptedPayload});
 
         emit Claimed(nftId, msg.sender);
     }
@@ -137,11 +133,11 @@ contract KinzokuV2 {
     }
 
     /// @notice Get all claims with encrypted payloads (for owner's fetch script)
-    function getAllClaims() external view returns (
-        address[99] memory claimants,
-        Status[99] memory statuses,
-        string[99] memory payloads
-    ) {
+    function getAllClaims()
+        external
+        view
+        returns (address[99] memory claimants, Status[99] memory statuses, string[99] memory payloads)
+    {
         for (uint256 i = 1; i <= 99; i++) {
             Claim storage c = claims[i];
             claimants[i - 1] = c.claimant;
@@ -151,11 +147,12 @@ contract KinzokuV2 {
     }
 
     /// @notice Get single claim
-    function getClaim(uint256 nftId) external view validId(nftId) returns (
-        address claimant,
-        Status status,
-        string memory encryptedPayload
-    ) {
+    function getClaim(uint256 nftId)
+        external
+        view
+        validId(nftId)
+        returns (address claimant, Status status, string memory encryptedPayload)
+    {
         Claim storage c = claims[nftId];
         return (c.claimant, c.status, c.encryptedPayload);
     }
@@ -178,7 +175,7 @@ contract KinzokuV2 {
             Status st = Status(statusRaw);
             if (st == Status.Unclaimed) continue;
 
-            claims[nftId] = Claim({ claimant: claimant, status: st, encryptedPayload: payload });
+            claims[nftId] = Claim({claimant: claimant, status: st, encryptedPayload: payload});
             emit StatusChanged(nftId, st);
             if (claimant != address(0)) {
                 emit Claimed(nftId, claimant);

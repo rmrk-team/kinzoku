@@ -10,4 +10,7 @@ optimizer_runs = 200
 # Without this, `vm.createDir` / `stdJson.write` will revert.
 fs_permissions = [{ access = "read-write", path = "./deployments" }]
 
+[profile.ci]
+# Keep GitHub Actions' FOUNDRY_PROFILE=ci explicit while inheriting default settings.
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
